@@ -11,17 +11,14 @@ const app = express();
 const PORT = 5000;
 
 // ======================
-// ✅ MongoDB Connect
+// MongoDB Connect
 // ======================
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log("✅ MongoDB Connected"))
   .catch((err) => console.log("❌ MongoDB Error:", err.message));
 
-// 🔎 DEBUG
-console.log("GROQ KEY LOADED:", process.env.GROQ_API_KEY ? "YES" : "NO");
-
 // ======================
-// ✅ Schema & Model
+// Schema
 // ======================
 const analysisSchema = new mongoose.Schema({
   resumeText: String,
@@ -30,6 +27,7 @@ const analysisSchema = new mongoose.Schema({
   reasoning: String,
   strengths: [String],
   missingSkills: [String],
+  matchedSkills: [String],
   improvementSuggestions: [String],
   createdAt: {
     type: Date,
@@ -40,7 +38,7 @@ const analysisSchema = new mongoose.Schema({
 const Analysis = mongoose.model("Analysis", analysisSchema);
 
 // ======================
-// ✅ Groq Setup
+// Groq Setup
 // ======================
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
@@ -69,50 +67,84 @@ app.post("/analyze", upload.single("resume"), async (req, res) => {
       return res.status(400).json({ error: "Resume required" });
     }
 
-    const jobDescription = req.body.jobDescription;
+    let jobDescription = req.body.jobDescription;
     if (!jobDescription) {
       return res.status(400).json({ error: "Job description required" });
     }
 
-    // ✅ PDF Parse
+    // ✅ Clean JD
+    jobDescription = jobDescription
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 1000);
+
+    // ======================
+    // PDF Parse + Clean
+    // ======================
     let resumeText = "";
     try {
       const pdfData = await pdfParse(req.file.buffer);
-      resumeText = pdfData.text;
+
+      resumeText = pdfData.text
+        .replace(/\s+/g, " ")
+        .replace(/[^a-zA-Z0-9.,\n ]/g, "")
+        .trim()
+        .slice(0, 3000);
     } catch {
       return res.status(400).json({ error: "Invalid PDF file" });
     }
 
-    // 🔥 AI Call
+    // ======================
+    // 🔥 SKILL MATCH LOGIC
+    // ======================
+    const skillKeywords = [
+      "javascript", "react", "node", "express", "mongodb",
+      "java", "spring", "mysql", "api", "backend"
+    ];
+
+    const resumeLower = resumeText.toLowerCase();
+    const jdLower = jobDescription.toLowerCase();
+
+    const matchedSkills = skillKeywords.filter(skill =>
+      resumeLower.includes(skill) && jdLower.includes(skill)
+    );
+
+    const skillScore = (matchedSkills.length / skillKeywords.length) * 50;
+
+    // ======================
+    // 🔥 AI CALL
+    // ======================
     const completion = await groq.chat.completions.create({
       model: "llama-3.1-8b-instant",
-      temperature: 0.3,
+      temperature: 0.2,
+      max_tokens: 800,
       messages: [
         {
           role: "system",
           content: `
-You are an ATS resume analyzer.
+You are a strict ATS recruiter.
 
-Return ONLY valid JSON:
+Rules:
+- NEVER guess
+- ONLY use actual resume content
+- Penalize missing skills
+
+Return ONLY JSON:
 
 {
-  "matchScore": percentage from 0 to 100,
-  "reasoning": "Detailed explanation",
+  "matchScore": number,
+  "reasoning": "Resume Skills = X, Job Needs = Y → explain match",
   "strengths": [],
   "missingSkills": [],
   "improvementSuggestions": []
 }
-
-Scoring rules:
-- 90-100 = excellent match
-- 70-89 = strong match
-- 50-69 = average match
-- below 50 = poor match
-`,
+          `,
         },
         {
           role: "user",
           content: `
+Compare strictly:
+
 Resume:
 ${resumeText}
 
@@ -125,7 +157,9 @@ ${jobDescription}
 
     const aiText = completion.choices[0].message.content;
 
-    // ✅ Safe JSON parse
+    // ======================
+    // SAFE JSON PARSE
+    // ======================
     let parsed;
     try {
       const jsonStart = aiText.indexOf("{");
@@ -136,15 +170,23 @@ ${jobDescription}
       return res.status(500).json({ error: "AI returned invalid JSON" });
     }
 
-    // ✅ Normalize score (fix 0.7 → 70)
-    if (parsed.matchScore <= 1) {
-      parsed.matchScore = Math.round(parsed.matchScore * 100);
+    // ======================
+    // 🔥 HYBRID SCORING
+    // ======================
+    let finalScore = Math.round((parsed.matchScore * 0.5) + skillScore);
+
+    // Prevent over-scoring
+    if (matchedSkills.length <= 2) {
+      finalScore = Math.min(finalScore, 50);
     }
 
-    parsed.matchScore = Math.min(100, Math.max(0, parsed.matchScore));
+    finalScore = Math.min(100, Math.max(0, finalScore));
+
+    parsed.matchScore = finalScore;
+    parsed.matchedSkills = matchedSkills;
 
     // ======================
-    // ✅ SAVE
+    // SAVE
     // ======================
     await Analysis.create({
       resumeText,
@@ -152,7 +194,6 @@ ${jobDescription}
       ...parsed,
     });
 
-    // ✅ Response
     res.json(parsed);
 
   } catch (error) {
@@ -164,21 +205,23 @@ ${jobDescription}
   }
 });
 
-// 🔥 History Route (CLEAN)
+// ======================
+// HISTORY
+// ======================
 app.get("/history", async (req, res) => {
   try {
     const data = await Analysis.find()
-      .select("-resumeText") // remove heavy text
+      .select("-resumeText")
       .sort({ createdAt: -1 });
 
     res.json(data);
-  } catch (err) {
+  } catch {
     res.status(500).json({ error: "Failed to fetch history" });
   }
 });
 
 // ======================
-// Start Server
+// START SERVER
 // ======================
 app.listen(PORT, () => {
   console.log(`🚀 Server running at http://localhost:${PORT}`);
