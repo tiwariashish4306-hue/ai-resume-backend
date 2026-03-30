@@ -8,14 +8,15 @@ const Groq = require("groq-sdk");
 const mongoose = require("mongoose");
 
 const app = express();
-const PORT = 5000;
+const PORT = process.env.PORT || 5000;
 
 // ======================
-// MongoDB Connect
+// Middleware
 // ======================
-mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log("✅ MongoDB Connected"))
-  .catch((err) => console.log("❌ MongoDB Error:", err.message));
+app.use(cors());
+app.use(express.json());
+
+const upload = multer({ storage: multer.memoryStorage() });
 
 // ======================
 // Schema
@@ -45,19 +46,11 @@ const groq = new Groq({
 });
 
 // ======================
-// Middleware
-// ======================
-app.use(cors());
-app.use(express.json());
-
-const upload = multer({ storage: multer.memoryStorage() });
-
-// ======================
 // Routes
 // ======================
 
 app.get("/", (req, res) => {
-  res.send("Server running...");
+  res.send("✅ Server running...");
 });
 
 // 🔥 Analyze Route
@@ -72,14 +65,13 @@ app.post("/analyze", upload.single("resume"), async (req, res) => {
       return res.status(400).json({ error: "Job description required" });
     }
 
-    // ✅ Clean JD
     jobDescription = jobDescription
       .replace(/\s+/g, " ")
       .trim()
       .slice(0, 1000);
 
     // ======================
-    // PDF Parse + Clean
+    // PDF Parse
     // ======================
     let resumeText = "";
     try {
@@ -95,7 +87,7 @@ app.post("/analyze", upload.single("resume"), async (req, res) => {
     }
 
     // ======================
-    // 🔥 SKILL MATCH LOGIC
+    // Skill Matching
     // ======================
     const skillKeywords = [
       "javascript", "react", "node", "express", "mongodb",
@@ -112,7 +104,7 @@ app.post("/analyze", upload.single("resume"), async (req, res) => {
     const skillScore = (matchedSkills.length / skillKeywords.length) * 50;
 
     // ======================
-    // 🔥 AI CALL
+    // AI CALL
     // ======================
     const completion = await groq.chat.completions.create({
       model: "llama-3.1-8b-instant",
@@ -124,16 +116,10 @@ app.post("/analyze", upload.single("resume"), async (req, res) => {
           content: `
 You are a strict ATS recruiter.
 
-Rules:
-- NEVER guess
-- ONLY use actual resume content
-- Penalize missing skills
-
 Return ONLY JSON:
-
 {
   "matchScore": number,
-  "reasoning": "Resume Skills = X, Job Needs = Y → explain match",
+  "reasoning": "",
   "strengths": [],
   "missingSkills": [],
   "improvementSuggestions": []
@@ -143,8 +129,6 @@ Return ONLY JSON:
         {
           role: "user",
           content: `
-Compare strictly:
-
 Resume:
 ${resumeText}
 
@@ -157,9 +141,6 @@ ${jobDescription}
 
     const aiText = completion.choices[0].message.content;
 
-    // ======================
-    // SAFE JSON PARSE
-    // ======================
     let parsed;
     try {
       const jsonStart = aiText.indexOf("{");
@@ -171,11 +152,10 @@ ${jobDescription}
     }
 
     // ======================
-    // 🔥 HYBRID SCORING
+    // Final Score
     // ======================
     let finalScore = Math.round((parsed.matchScore * 0.5) + skillScore);
 
-    // Prevent over-scoring
     if (matchedSkills.length <= 2) {
       finalScore = Math.min(finalScore, 50);
     }
@@ -186,7 +166,7 @@ ${jobDescription}
     parsed.matchedSkills = matchedSkills;
 
     // ======================
-    // SAVE
+    // Save to DB
     // ======================
     await Analysis.create({
       resumeText,
@@ -206,7 +186,7 @@ ${jobDescription}
 });
 
 // ======================
-// HISTORY
+// History
 // ======================
 app.get("/history", async (req, res) => {
   try {
@@ -221,8 +201,16 @@ app.get("/history", async (req, res) => {
 });
 
 // ======================
-// START SERVER
+// START SERVER (IMPORTANT FIX)
 // ======================
-app.listen(PORT, () => {
-  console.log(`🚀 Server running at http://localhost:${PORT}`);
-});
+mongoose.connect(process.env.MONGO_URI)
+  .then(() => {
+    console.log("✅ MongoDB Connected");
+
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`🚀 Server running on port ${PORT}`);
+    });
+  })
+  .catch((err) => {
+    console.log("❌ MongoDB Error:", err.message);
+  });
