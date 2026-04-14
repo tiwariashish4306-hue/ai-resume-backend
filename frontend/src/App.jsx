@@ -9,9 +9,11 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  const API_URL = "https://ai-resume-backend-ro92.onrender.com";
+
   // 🔥 Load history on start
   useEffect(() => {
-    fetch("http://localhost:5000/history")
+    fetch(`${API_URL}/history`)
       .then((res) => res.json())
       .then((data) => setHistory(data))
       .catch(() => {});
@@ -32,7 +34,7 @@ function App() {
     formData.append("jobDescription", jobDescription);
 
     try {
-      const response = await fetch("http://localhost:5000/analyze", {
+      const response = await fetch(`${API_URL}/analyze`, {
         method: "POST",
         body: formData,
       });
@@ -45,8 +47,8 @@ function App() {
 
       setResult(data);
 
-      // 🔥 Refresh history after new analysis
-      const historyRes = await fetch("http://localhost:5000/history");
+      // 🔥 Refresh history
+      const historyRes = await fetch(`${API_URL}/history`);
       const historyData = await historyRes.json();
       setHistory(historyData);
 
@@ -95,22 +97,13 @@ function App() {
 
         {/* RESULT */}
         {result && (
-          <div
-            style={{
-              background: "white",
-              padding: "20px",
-              borderRadius: "15px",
-              marginTop: "20px",
-              boxShadow: "0 10px 25px rgba(0,0,0,0.1)"
-            }}
-          >
+          <div className="result-card">
 
-            {/* 🔥 MATCH SCORE */}
-            <div style={{ textAlign: "center", marginBottom: "20px" }}>
+            {/* MATCH SCORE */}
+            <div className="score-box">
               <div
+                className="score"
                 style={{
-                  fontSize: "48px",
-                  fontWeight: "bold",
                   color:
                     result.matchScore > 70
                       ? "green"
@@ -121,17 +114,17 @@ function App() {
               >
                 {result.matchScore}%
               </div>
-              <p style={{ fontSize: "18px" }}>Match Score</p>
+              <p>Match Score</p>
             </div>
 
-            {/* 🧠 Reasoning */}
-            <div style={{ marginTop: "20px" }}>
+            {/* Reasoning */}
+            <div>
               <h3>🧠 Reasoning</h3>
               <p>{result.reasoning}</p>
             </div>
 
-            {/* ✅ Strengths */}
-            <div style={{ marginTop: "20px" }}>
+            {/* Strengths */}
+            <div>
               <h3>✅ Strengths</h3>
               <ul>
                 {result.strengths?.map((s, i) => (
@@ -140,8 +133,8 @@ function App() {
               </ul>
             </div>
 
-            {/* ❌ Missing Skills */}
-            <div style={{ marginTop: "20px" }}>
+            {/* Missing Skills */}
+            <div>
               <h3>❌ Missing Skills</h3>
               <ul>
                 {result.missingSkills?.map((m, i) => (
@@ -150,8 +143,8 @@ function App() {
               </ul>
             </div>
 
-            {/* 🚀 Improvements */}
-            <div style={{ marginTop: "20px" }}>
+            {/* Improvements */}
+            <div>
               <h3>🚀 Improvement Suggestions</h3>
               <ul>
                 {result.improvementSuggestions?.map((item, idx) => (
@@ -163,29 +156,15 @@ function App() {
           </div>
         )}
 
-        {/* 📜 HISTORY */}
+        {/* HISTORY */}
         {history.length > 0 && (
-          <div
-            style={{
-              marginTop: "30px",
-              background: "white",
-              padding: "20px",
-              borderRadius: "15px",
-              boxShadow: "0 10px 25px rgba(0,0,0,0.1)"
-            }}
-          >
+          <div className="history-card">
             <h3>📜 Previous Analyses</h3>
 
             {history.map((item, i) => (
-              <div
-                key={i}
-                style={{
-                  borderBottom: "1px solid #ddd",
-                  padding: "10px 0"
-                }}
-              >
+              <div key={i} className="history-item">
                 <p><strong>Score:</strong> {item.matchScore}%</p>
-                <p style={{ fontSize: "14px", color: "#555" }}>
+                <p>
                   {item.jobDescription?.slice(0, 80)}...
                 </p>
               </div>
