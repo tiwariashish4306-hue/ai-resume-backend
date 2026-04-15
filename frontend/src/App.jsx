@@ -16,9 +16,7 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // ======================
   // LOAD HISTORY
-  // ======================
   useEffect(() => {
     if (!token) return;
 
@@ -32,9 +30,7 @@ function App() {
       .catch(() => {});
   }, [token]);
 
-  // ======================
   // AUTH
-  // ======================
   const handleSignup = async () => {
     try {
       const res = await fetch(`${API_URL}/signup`, {
@@ -46,11 +42,9 @@ function App() {
       });
 
       const data = await res.json();
-
       if (!res.ok) throw new Error(data.error);
 
       alert("Signup successful ✅");
-
     } catch (err) {
       alert(err.message);
     }
@@ -67,14 +61,12 @@ function App() {
       });
 
       const data = await res.json();
-
       if (!res.ok) throw new Error(data.error);
 
       localStorage.setItem("token", data.token);
       setToken(data.token);
 
       alert("Login successful 🚀");
-
     } catch (err) {
       alert(err.message);
     }
@@ -87,9 +79,7 @@ function App() {
     setResult(null);
   };
 
-  // ======================
   // ANALYZE
-  // ======================
   const handleSubmit = async () => {
     if (!file || !jobDescription) {
       alert("Upload resume and paste job description");
@@ -121,7 +111,6 @@ function App() {
 
       setResult(data);
 
-      // refresh history
       const historyRes = await fetch(`${API_URL}/history`, {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -138,17 +127,12 @@ function App() {
     setLoading(false);
   };
 
-  // ======================
   // LOGIN UI
-  // ======================
   if (!token) {
     return (
       <div className="app">
         <div className="card login-card">
           <h1>🚀 Welcome</h1>
-          <p style={{ marginBottom: "20px", color: "#666" }}>
-            Login to analyze your resume
-          </p>
 
           <input
             className="input"
@@ -177,17 +161,15 @@ function App() {
     );
   }
 
-  // ======================
   // MAIN APP
-  // ======================
   return (
     <div className="app">
       <div className="card">
 
-        <div style={{ display: "flex", justifyContent: "space-between" }}>
-          <h1>AI Resume Analyzer</h1>
-          <button className="logout-btn" onClick={logout}>Logout</button>
-        </div>
+        {/* ✅ TITLE TOP */}
+        <h1 style={{ textAlign: "center", marginBottom: "20px" }}>
+          🚀 AI Resume Analyzer
+        </h1>
 
         <label className="file-label">
           {file ? file.name : "Upload Resume"}
@@ -229,6 +211,15 @@ function App() {
             </div>
           ))}
         </div>
+
+        {/* ✅ LOGOUT BOTTOM */}
+        <button
+          className="logout-btn"
+          onClick={logout}
+          style={{ marginTop: "30px", width: "100%" }}
+        >
+          Logout
+        </button>
 
       </div>
     </div>
