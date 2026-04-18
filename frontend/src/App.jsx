@@ -5,6 +5,7 @@ const API_URL = "https://ai-resume-backend-ro92.onrender.com";
 
 function App() {
   const [token, setToken] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -15,21 +16,34 @@ function App() {
   const [loading, setLoading] = useState(false);
 
   // ======================
-  // LOAD TOKEN (SAFE)
+  // VERIFY TOKEN (FIXED 🔥)
   // ======================
   useEffect(() => {
     const storedToken = localStorage.getItem("token");
 
-    if (
-      storedToken &&
-      storedToken !== "undefined" &&
-      storedToken !== "null"
-    ) {
-      setToken(storedToken);
-    } else {
-      localStorage.removeItem("token");
-      setToken(null);
+    if (!storedToken) {
+      setAuthLoading(false);
+      return;
     }
+
+    fetch(`${API_URL}/ping`, {
+      headers: {
+        Authorization: `Bearer ${storedToken}`,
+      },
+    })
+      .then((res) => {
+        if (res.ok) {
+          setToken(storedToken);
+        } else {
+          localStorage.removeItem("token");
+        }
+      })
+      .catch(() => {
+        localStorage.removeItem("token");
+      })
+      .finally(() => {
+        setAuthLoading(false);
+      });
   }, []);
 
   // ======================
@@ -56,10 +70,9 @@ function App() {
   };
 
   // ======================
-  // LOGIN (FIXED 🔥)
+  // LOGIN
   // ======================
   const handleLogin = async () => {
-    // ❌ empty input block
     if (!email.trim() || !password.trim()) {
       return alert("Enter email & password");
     }
@@ -75,21 +88,16 @@ function App() {
 
       const data = await res.json();
 
-      // ❌ backend error
       if (!res.ok) {
         return alert(data.error || "Login failed");
       }
 
-      // ❌ invalid response
       if (!data.token) {
         return alert("Invalid server response");
       }
 
-      // ✅ only valid login allowed
-      setToken(data.token);
       localStorage.setItem("token", data.token);
-
-      alert("Login successful 🚀");
+      setToken(data.token);
 
     } catch {
       alert("Server error");
@@ -100,8 +108,8 @@ function App() {
   // LOGOUT
   // ======================
   const logout = () => {
-    setToken(null);
     localStorage.removeItem("token");
+    setToken(null);
     setResult(null);
   };
 
@@ -142,6 +150,13 @@ function App() {
 
     setLoading(false);
   };
+
+  // ======================
+  // LOADING SCREEN
+  // ======================
+  if (authLoading) {
+    return <h2 style={{ textAlign: "center" }}>Checking session...</h2>;
+  }
 
   // ======================
   // LOGIN UI
@@ -197,6 +212,7 @@ function App() {
 
         <textarea
           placeholder="Paste Job Description..."
+          value={jobDescription}
           onChange={(e) => setJobDescription(e.target.value)}
         />
 
@@ -204,11 +220,10 @@ function App() {
           {loading ? "Analyzing..." : "Analyze Resume"}
         </button>
 
-        {/* RESULT */}
         {result && (
           <div className="result-card">
 
-            <h2>Match Score: {result.matchScore}%</h2>
+            <h2>{result.matchScore}% Match</h2>
 
             <p><b>Analysis:</b> {result.reasoning}</p>
 

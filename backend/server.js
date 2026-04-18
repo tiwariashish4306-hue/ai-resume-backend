@@ -39,15 +39,28 @@ const Analysis = mongoose.model("Analysis", new mongoose.Schema({
 }));
 
 // ======================
-// AUTH
+// AUTH (STRICT)
 // ======================
 function auth(req, res, next) {
   const header = req.headers.authorization;
-  if (!header) return res.status(401).json({ error: "No token" });
+
+  if (!header || !header.startsWith("Bearer ")) {
+    return res.status(401).json({ error: "No token" });
+  }
 
   try {
     const token = header.split(" ")[1];
+
+    if (!token || token === "undefined" || token === "null") {
+      return res.status(401).json({ error: "Invalid token" });
+    }
+
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    if (!decoded?.id) {
+      return res.status(401).json({ error: "Invalid token" });
+    }
+
     req.user = decoded;
     next();
   } catch {
@@ -55,8 +68,6 @@ function auth(req, res, next) {
   }
 }
 
-// ======================
-// GROQ
 // ======================
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
@@ -66,7 +77,11 @@ const groq = new Groq({
 // ROUTES
 // ======================
 app.get("/", (req, res) => res.send("Server running"));
-app.get("/ping", (req, res) => res.json({ status: "alive" }));
+
+// 🔐 TOKEN VERIFY
+app.get("/ping", auth, (req, res) => {
+  res.json({ status: "valid" });
+});
 
 // ======================
 // SIGNUP
@@ -75,10 +90,15 @@ app.post("/signup", async (req, res) => {
   try {
     const { email, password } = req.body;
 
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email & password required" });
+    }
+
     const existing = await User.findOne({ email });
     if (existing) return res.status(400).json({ error: "User exists" });
 
     const hashed = await bcrypt.hash(password, 10);
+
     await User.create({ email, password: hashed });
 
     res.json({ message: "Signup success" });
@@ -88,30 +108,43 @@ app.post("/signup", async (req, res) => {
 });
 
 // ======================
-// LOGIN
+// LOGIN (NO BYPASS)
 // ======================
 app.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
 
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email & password required" });
+    }
+
     const user = await User.findOne({ email });
-    if (!user) return res.status(400).json({ error: "Invalid credentials" });
+
+    if (!user) {
+      return res.status(400).json({ error: "Invalid credentials" });
+    }
 
     const valid = await bcrypt.compare(password, user.password);
-    if (!valid) return res.status(400).json({ error: "Invalid credentials" });
 
-    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
-      expiresIn: "7d",
-    });
+    if (!valid) {
+      return res.status(400).json({ error: "Invalid credentials" });
+    }
 
-    res.json({ token });
+    const token = jwt.sign(
+      { id: user._id },
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
+    return res.json({ token });
+
   } catch {
     res.status(500).json({ error: "Login failed" });
   }
 });
 
 // ======================
-// ANALYZE (FINAL FIXED)
+// ANALYZE (PROTECTED)
 // ======================
 app.post("/analyze", auth, upload.single("resume"), async (req, res) => {
   try {
@@ -125,7 +158,7 @@ app.post("/analyze", auth, upload.single("resume"), async (req, res) => {
 
     let aiResult = {
       matchScore: 60,
-      reasoning: "AI failed, fallback used",
+      reasoning: "",
       strengths: [],
       missingSkills: [],
       improvementSuggestions: [],
@@ -136,109 +169,46 @@ app.post("/analyze", auth, upload.single("resume"), async (req, res) => {
       const completion = await groq.chat.completions.create({
         model: "llama-3.1-8b-instant",
         temperature: 0.3,
-        max_tokens: 1200,
+        max_tokens: 1000,
         messages: [
           {
             role: "system",
-            content: `
-You are a professional ATS resume analyzer.
-
-STRICT RULES:
-- Output ONLY valid JSON (no explanation, no markdown)
-- Reasoning must be detailed (5-6 lines)
-- Each list must contain 3-5 bullet points
-
-FORMAT:
+            content: `Return ONLY JSON:
 {
   "matchScore": number,
-  "reasoning": "detailed explanation",
-  "strengths": ["..."],
-  "missingSkills": ["..."],
-  "improvementSuggestions": ["..."],
-  "finalSummary": "4-5 line improved summary"
-}
-`
+  "reasoning": "",
+  "strengths": [],
+  "missingSkills": [],
+  "improvementSuggestions": [],
+  "finalSummary": ""
+}`
           },
           {
             role: "user",
-            content: `
-Resume:
-${resumeText}
-
-Job Description:
-${jobDescription}
-`
+            content: `Resume:\n${resumeText}\n\nJob:\n${jobDescription}`
           }
         ],
       });
 
       const raw = completion.choices[0].message.content;
+      const match = raw.match(/\{[\s\S]*\}/);
 
-      console.log("🔥 RAW AI:", raw);
-
-      // CLEAN RESPONSE
-      const cleaned = raw
-        .replace(/```json/g, "")
-        .replace(/```/g, "")
-        .trim();
-
-      const start = cleaned.indexOf("{");
-      const end = cleaned.lastIndexOf("}");
-
-      if (start !== -1 && end !== -1) {
-        const json = cleaned.substring(start, end + 1);
-
-        const parsed = JSON.parse(json);
-
-        aiResult = {
-          matchScore: parsed.matchScore || 0,
-          reasoning: parsed.reasoning || "",
-          strengths: parsed.strengths || [],
-          missingSkills: parsed.missingSkills || [],
-          improvementSuggestions: parsed.improvementSuggestions || [],
-          finalSummary: parsed.finalSummary || "",
-        };
-      } else {
-        console.log("❌ JSON not found");
+      if (match) {
+        const parsed = JSON.parse(match[0]);
+        aiResult = parsed;
       }
 
-    } catch (err) {
-      console.log("❌ AI ERROR:", err.message);
-    }
-
-    await Analysis.create({
-      userId: req.user.id,
-      resumeText,
-      jobDescription,
-      ...aiResult,
-    });
+    } catch {}
 
     res.json(aiResult);
 
-  } catch (err) {
-    console.log("SERVER ERROR:", err);
+  } catch {
     res.status(500).json({ error: "Server error" });
   }
 });
 
-// ======================
-// HISTORY
-// ======================
-app.get("/history", auth, async (req, res) => {
-  const data = await Analysis.find({ userId: req.user.id })
-    .select("-resumeText")
-    .sort({ createdAt: -1 });
-
-  res.json(data);
-});
-
-// ======================
-// START
-// ======================
 mongoose.connect(process.env.MONGO_URI)
   .then(() => {
-    app.listen(PORT, "0.0.0.0", () =>
-      console.log("Server running on", PORT)
-    );
+    app.listen(PORT, () => console.log("Server running"));
   })
   .catch(console.log);
