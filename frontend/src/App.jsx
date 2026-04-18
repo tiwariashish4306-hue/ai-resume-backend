@@ -12,11 +12,10 @@ function App() {
   const [file, setFile] = useState(null);
   const [jobDescription, setJobDescription] = useState("");
   const [result, setResult] = useState(null);
-  const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(false);
 
   // ======================
-  // LOAD TOKEN (FIXED 🔥)
+  // LOAD TOKEN (SAFE)
   // ======================
   useEffect(() => {
     const storedToken = localStorage.getItem("token");
@@ -28,15 +27,19 @@ function App() {
     ) {
       setToken(storedToken);
     } else {
-      setToken(null);
       localStorage.removeItem("token");
+      setToken(null);
     }
   }, []);
 
   // ======================
-  // LOGIN / SIGNUP
+  // SIGNUP
   // ======================
   const handleSignup = async () => {
+    if (!email || !password) {
+      return alert("Enter email & password");
+    }
+
     const res = await fetch(`${API_URL}/signup`, {
       method: "POST",
       headers: {
@@ -46,32 +49,56 @@ function App() {
     });
 
     const data = await res.json();
+
     if (!res.ok) return alert(data.error);
 
     alert("Signup successful ✅");
   };
 
+  // ======================
+  // LOGIN (FIXED 🔥)
+  // ======================
   const handleLogin = async () => {
-    const res = await fetch(`${API_URL}/login`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ email, password }),
-    });
+    // ❌ empty input block
+    if (!email.trim() || !password.trim()) {
+      return alert("Enter email & password");
+    }
 
-    const data = await res.json();
-    if (!res.ok) return alert(data.error);
+    try {
+      const res = await fetch(`${API_URL}/login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email, password }),
+      });
 
-    // 🔥 FIXED LOGIN
-    if (data.token) {
+      const data = await res.json();
+
+      // ❌ backend error
+      if (!res.ok) {
+        return alert(data.error || "Login failed");
+      }
+
+      // ❌ invalid response
+      if (!data.token) {
+        return alert("Invalid server response");
+      }
+
+      // ✅ only valid login allowed
       setToken(data.token);
       localStorage.setItem("token", data.token);
-    } else {
-      alert("Login failed properly");
+
+      alert("Login successful 🚀");
+
+    } catch {
+      alert("Server error");
     }
   };
 
+  // ======================
+  // LOGOUT
+  // ======================
   const logout = () => {
     setToken(null);
     localStorage.removeItem("token");
@@ -92,16 +119,27 @@ function App() {
     formData.append("resume", file);
     formData.append("jobDescription", jobDescription);
 
-    const res = await fetch(`${API_URL}/analyze`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-      body: formData,
-    });
+    try {
+      const res = await fetch(`${API_URL}/analyze`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body: formData,
+      });
 
-    const data = await res.json();
-    setResult(data);
+      const data = await res.json();
+
+      if (!res.ok) {
+        return alert(data.error || "Analyze failed");
+      }
+
+      setResult(data);
+
+    } catch {
+      alert("Server error");
+    }
+
     setLoading(false);
   };
 
