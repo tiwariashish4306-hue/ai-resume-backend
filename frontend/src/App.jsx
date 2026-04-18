@@ -4,7 +4,7 @@ import "./App.css";
 const API_URL = "https://ai-resume-backend-ro92.onrender.com";
 
 function App() {
-  const [token, setToken] = useState(localStorage.getItem("token"));
+  const [token, setToken] = useState(null);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -14,130 +14,86 @@ function App() {
   const [result, setResult] = useState(null);
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
 
-  // LOAD HISTORY
-  useEffect(() => {
-    if (!token) return;
-
-    fetch(`${API_URL}/history`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    })
-      .then((res) => res.json())
-      .then((data) => setHistory(data))
-      .catch(() => {});
-  }, [token]);
-
-  // AUTH
+  // ======================
+  // LOGIN / SIGNUP
+  // ======================
   const handleSignup = async () => {
-    try {
-      const res = await fetch(`${API_URL}/signup`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ email, password }),
-      });
+    const res = await fetch(`${API_URL}/signup`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ email, password }),
+    });
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+    const data = await res.json();
+    if (!res.ok) return alert(data.error);
 
-      alert("Signup successful ✅");
-    } catch (err) {
-      alert(err.message);
-    }
+    alert("Signup successful ✅");
   };
 
   const handleLogin = async () => {
-    try {
-      const res = await fetch(`${API_URL}/login`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ email, password }),
-      });
+    const res = await fetch(`${API_URL}/login`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ email, password }),
+    });
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+    const data = await res.json();
+    if (!res.ok) return alert(data.error);
 
-      localStorage.setItem("token", data.token);
-      setToken(data.token);
-
-      alert("Login successful 🚀");
-    } catch (err) {
-      alert(err.message);
-    }
+    setToken(data.token);
+    localStorage.setItem("token", data.token);
   };
 
   const logout = () => {
-    localStorage.removeItem("token");
     setToken(null);
-    setHistory([]);
+    localStorage.clear();
     setResult(null);
   };
 
+  // ======================
   // ANALYZE
+  // ======================
   const handleSubmit = async () => {
     if (!file || !jobDescription) {
-      alert("Upload resume and paste job description");
-      return;
+      return alert("Upload resume + job description");
     }
 
     setLoading(true);
-    setError("");
-    setResult(null);
 
     const formData = new FormData();
     formData.append("resume", file);
     formData.append("jobDescription", jobDescription);
 
-    try {
-      const response = await fetch(`${API_URL}/analyze`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-        body: formData,
-      });
+    const res = await fetch(`${API_URL}/analyze`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      body: formData,
+    });
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || "Something went wrong");
-      }
-
-      setResult(data);
-
-      const historyRes = await fetch(`${API_URL}/history`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
-      const historyData = await historyRes.json();
-      setHistory(historyData);
-
-    } catch (err) {
-      setError(err.message);
-    }
-
+    const data = await res.json();
+    setResult(data);
     setLoading(false);
   };
 
+  // ======================
   // LOGIN UI
+  // ======================
   if (!token) {
     return (
       <div className="app">
         <div className="card login-card">
-          <h1>🚀 Welcome</h1>
+          <h1>🚀 Login</h1>
 
           <input
             className="input"
             placeholder="Email"
-            value={email}
             onChange={(e) => setEmail(e.target.value)}
           />
 
@@ -145,7 +101,6 @@ function App() {
             className="input"
             type="password"
             placeholder="Password"
-            value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
 
@@ -154,70 +109,76 @@ function App() {
           </button>
 
           <button className="secondary-btn" onClick={handleSignup}>
-            Create Account
+            Signup
           </button>
         </div>
       </div>
     );
   }
 
-  // MAIN APP
+  // ======================
+  // MAIN UI
+  // ======================
   return (
     <div className="app">
       <div className="card">
 
-        {/* ✅ TITLE TOP */}
-        <h1 style={{ textAlign: "center", marginBottom: "20px" }}>
-          🚀 AI Resume Analyzer
-        </h1>
+        <h1>🚀 AI Resume Analyzer</h1>
 
         <label className="file-label">
           {file ? file.name : "Upload Resume"}
           <input
             type="file"
-            onChange={(e) => setFile(e.target.files[0])}
             hidden
+            onChange={(e) => setFile(e.target.files[0])}
           />
         </label>
 
         <textarea
           placeholder="Paste Job Description..."
-          value={jobDescription}
           onChange={(e) => setJobDescription(e.target.value)}
         />
 
-        <button className="primary-btn" onClick={handleSubmit} disabled={loading}>
+        <button className="primary-btn" onClick={handleSubmit}>
           {loading ? "Analyzing..." : "Analyze Resume"}
         </button>
 
-        {error && <p className="error">{error}</p>}
-
+        {/* ================= RESULT ================= */}
         {result && (
           <div className="result-card">
-            <h2>{result.matchScore}% Match</h2>
-            <p>{result.reasoning}</p>
+
+            <h2>Match Score: {result.matchScore}%</h2>
+
+            <p><b>Analysis:</b> {result.reasoning}</p>
+
+            <h3>💪 Strengths</h3>
+            <ul>
+              {result.strengths?.map((s, i) => (
+                <li key={i}>{s}</li>
+              ))}
+            </ul>
+
+            <h3>⚠️ Missing Skills</h3>
+            <ul>
+              {result.missingSkills?.map((s, i) => (
+                <li key={i}>{s}</li>
+              ))}
+            </ul>
+
+            <h3>🚀 Suggestions</h3>
+            <ul>
+              {result.improvementSuggestions?.map((s, i) => (
+                <li key={i}>{s}</li>
+              ))}
+            </ul>
+
+            <h3>📄 Improved Summary</h3>
+            <p>{result.finalSummary}</p>
+
           </div>
         )}
 
-        <div className="history-card">
-          <h3>📜 History</h3>
-
-          {history.length === 0 && <p>No history yet</p>}
-
-          {history.map((item, i) => (
-            <div key={i} className="history-item">
-              <strong>{item.matchScore}%</strong> —{" "}
-              {item.jobDescription.slice(0, 60)}...
-            </div>
-          ))}
-        </div>
-
-        {/* ✅ LOGOUT BOTTOM */}
-        <button
-          className="logout-btn"
-          onClick={logout}
-          style={{ marginTop: "30px", width: "100%" }}
-        >
+        <button className="logout-btn" onClick={logout}>
           Logout
         </button>
 

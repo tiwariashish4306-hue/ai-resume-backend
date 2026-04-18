@@ -33,8 +33,8 @@ const Analysis = mongoose.model("Analysis", new mongoose.Schema({
   reasoning: String,
   strengths: [String],
   missingSkills: [String],
-  matchedSkills: [String],
   improvementSuggestions: [String],
+  finalSummary: String,
   createdAt: { type: Date, default: Date.now },
 }));
 
@@ -68,7 +68,9 @@ const groq = new Groq({
 app.get("/", (req, res) => res.send("Server running"));
 app.get("/ping", (req, res) => res.json({ status: "alive" }));
 
+// ======================
 // SIGNUP
+// ======================
 app.post("/signup", async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -85,7 +87,9 @@ app.post("/signup", async (req, res) => {
   }
 });
 
+// ======================
 // LOGIN
+// ======================
 app.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -107,7 +111,7 @@ app.post("/login", async (req, res) => {
 });
 
 // ======================
-// ANALYZE (SAFE GROQ)
+// ANALYZE (FINAL FIXED)
 // ======================
 app.post("/analyze", auth, upload.single("resume"), async (req, res) => {
   try {
@@ -121,48 +125,85 @@ app.post("/analyze", auth, upload.single("resume"), async (req, res) => {
 
     let aiResult = {
       matchScore: 60,
-      reasoning: "Basic fallback analysis",
+      reasoning: "AI failed, fallback used",
       strengths: [],
       missingSkills: [],
       improvementSuggestions: [],
+      finalSummary: "",
     };
 
     try {
       const completion = await groq.chat.completions.create({
         model: "llama-3.1-8b-instant",
-        temperature: 0.2,
-        max_tokens: 500,
+        temperature: 0.3,
+        max_tokens: 1200,
         messages: [
           {
             role: "system",
-            content: `Return ONLY JSON:
+            content: `
+You are a professional ATS resume analyzer.
+
+STRICT RULES:
+- Output ONLY valid JSON (no explanation, no markdown)
+- Reasoning must be detailed (5-6 lines)
+- Each list must contain 3-5 bullet points
+
+FORMAT:
 {
-"matchScore": number,
-"reasoning": "",
-"strengths": [],
-"missingSkills": [],
-"improvementSuggestions": []
-}`,
+  "matchScore": number,
+  "reasoning": "detailed explanation",
+  "strengths": ["..."],
+  "missingSkills": ["..."],
+  "improvementSuggestions": ["..."],
+  "finalSummary": "4-5 line improved summary"
+}
+`
           },
           {
             role: "user",
-            content: `Resume: ${resumeText}\nJob: ${jobDescription}`,
-          },
+            content: `
+Resume:
+${resumeText}
+
+Job Description:
+${jobDescription}
+`
+          }
         ],
       });
 
-      const text = completion.choices[0].message.content;
+      const raw = completion.choices[0].message.content;
 
-      const jsonStart = text.indexOf("{");
-      const jsonEnd = text.lastIndexOf("}");
+      console.log("🔥 RAW AI:", raw);
 
-      if (jsonStart !== -1 && jsonEnd !== -1) {
-        const cleanJson = text.substring(jsonStart, jsonEnd + 1);
-        aiResult = JSON.parse(cleanJson);
+      // CLEAN RESPONSE
+      const cleaned = raw
+        .replace(/```json/g, "")
+        .replace(/```/g, "")
+        .trim();
+
+      const start = cleaned.indexOf("{");
+      const end = cleaned.lastIndexOf("}");
+
+      if (start !== -1 && end !== -1) {
+        const json = cleaned.substring(start, end + 1);
+
+        const parsed = JSON.parse(json);
+
+        aiResult = {
+          matchScore: parsed.matchScore || 0,
+          reasoning: parsed.reasoning || "",
+          strengths: parsed.strengths || [],
+          missingSkills: parsed.missingSkills || [],
+          improvementSuggestions: parsed.improvementSuggestions || [],
+          finalSummary: parsed.finalSummary || "",
+        };
+      } else {
+        console.log("❌ JSON not found");
       }
 
     } catch (err) {
-      console.log("AI fallback used");
+      console.log("❌ AI ERROR:", err.message);
     }
 
     await Analysis.create({
@@ -180,7 +221,9 @@ app.post("/analyze", auth, upload.single("resume"), async (req, res) => {
   }
 });
 
+// ======================
 // HISTORY
+// ======================
 app.get("/history", auth, async (req, res) => {
   const data = await Analysis.find({ userId: req.user.id })
     .select("-resumeText")
