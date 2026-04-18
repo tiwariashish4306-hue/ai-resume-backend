@@ -16,6 +16,24 @@ function App() {
   const [loading, setLoading] = useState(false);
 
   // ======================
+  // LOAD TOKEN (FIXED 🔥)
+  // ======================
+  useEffect(() => {
+    const storedToken = localStorage.getItem("token");
+
+    if (
+      storedToken &&
+      storedToken !== "undefined" &&
+      storedToken !== "null"
+    ) {
+      setToken(storedToken);
+    } else {
+      setToken(null);
+      localStorage.removeItem("token");
+    }
+  }, []);
+
+  // ======================
   // LOGIN / SIGNUP
   // ======================
   const handleSignup = async () => {
@@ -45,13 +63,18 @@ function App() {
     const data = await res.json();
     if (!res.ok) return alert(data.error);
 
-    setToken(data.token);
-    localStorage.setItem("token", data.token);
+    // 🔥 FIXED LOGIN
+    if (data.token) {
+      setToken(data.token);
+      localStorage.setItem("token", data.token);
+    } else {
+      alert("Login failed properly");
+    }
   };
 
   const logout = () => {
     setToken(null);
-    localStorage.clear();
+    localStorage.removeItem("token");
     setResult(null);
   };
 
@@ -143,7 +166,7 @@ function App() {
           {loading ? "Analyzing..." : "Analyze Resume"}
         </button>
 
-        {/* ================= RESULT ================= */}
+        {/* RESULT */}
         {result && (
           <div className="result-card">
 
