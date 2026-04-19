@@ -16,7 +16,7 @@ function App() {
   const [loading, setLoading] = useState(false);
 
   // ======================
-  // VERIFY TOKEN (SAFE)
+  // CHECK SESSION
   // ======================
   useEffect(() => {
     const storedToken = localStorage.getItem("token");
@@ -26,7 +26,7 @@ function App() {
       return;
     }
 
-    // simple check (no auth needed on ping)
+    // just check backend alive
     fetch(`${API_URL}/ping`)
       .then((res) => {
         if (res.ok) {
@@ -54,7 +54,9 @@ function App() {
     try {
       const res = await fetch(`${API_URL}/signup`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({ email, password }),
       });
 
@@ -79,7 +81,9 @@ function App() {
     try {
       const res = await fetch(`${API_URL}/login`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({ email, password }),
       });
 
@@ -141,7 +145,8 @@ function App() {
       try {
         data = JSON.parse(text);
       } catch {
-        alert("Server unstable, try again");
+        console.error("Invalid JSON:", text);
+        alert("Server error (invalid response)");
         setLoading(false);
         return;
       }
@@ -162,7 +167,7 @@ function App() {
   };
 
   // ======================
-  // LOADING
+  // LOADING SCREEN
   // ======================
   if (authLoading) {
     return <h2 style={{ textAlign: "center" }}>Checking session...</h2>;
@@ -235,7 +240,8 @@ function App() {
 
             <h2>{result.matchScore}% Match</h2>
 
-            <p><b>Analysis:</b> {result.reasoning}</p>
+            <h3>🧠 Detailed Analysis</h3>
+            <p>{result.reasoning}</p>
 
             <h3>💪 Strengths</h3>
             <ul>
@@ -251,14 +257,14 @@ function App() {
               ))}
             </ul>
 
-            <h3>🚀 Suggestions</h3>
+            <h3>🚀 Improvements</h3>
             <ul>
               {result.improvementSuggestions?.map((s, i) => (
                 <li key={i}>{s}</li>
               ))}
             </ul>
 
-            <h3>📄 Improved Summary</h3>
+            <h3>📄 Final Summary</h3>
             <p>{result.finalSummary}</p>
 
           </div>

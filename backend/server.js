@@ -50,8 +50,11 @@ function auth(req, res, next) {
 
   try {
     const token = header.split(" ")[1];
-
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    if (!decoded?.id) {
+      return res.status(401).json({ error: "Invalid token" });
+    }
 
     req.user = decoded;
     next();
@@ -70,7 +73,7 @@ const groq = new Groq({
 // ======================
 app.get("/", (req, res) => res.send("Server running"));
 
-// PUBLIC PING
+// PUBLIC PING (IMPORTANT FIX)
 app.get("/ping", (req, res) => {
   res.json({ status: "alive" });
 });
@@ -90,7 +93,6 @@ app.post("/signup", async (req, res) => {
     if (existing) return res.status(400).json({ error: "User exists" });
 
     const hashed = await bcrypt.hash(password, 10);
-
     await User.create({ email, password: hashed });
 
     res.json({ message: "Signup success" });
@@ -111,16 +113,10 @@ app.post("/login", async (req, res) => {
     }
 
     const user = await User.findOne({ email });
-
-    if (!user) {
-      return res.status(400).json({ error: "Invalid credentials" });
-    }
+    if (!user) return res.status(400).json({ error: "Invalid credentials" });
 
     const valid = await bcrypt.compare(password, user.password);
-
-    if (!valid) {
-      return res.status(400).json({ error: "Invalid credentials" });
-    }
+    if (!valid) return res.status(400).json({ error: "Invalid credentials" });
 
     const token = jwt.sign(
       { id: user._id },
@@ -128,128 +124,75 @@ app.post("/login", async (req, res) => {
       { expiresIn: "7d" }
     );
 
-    return res.json({ token });
-
+    res.json({ token });
   } catch {
     res.status(500).json({ error: "Login failed" });
   }
 });
 
 // ======================
-// ANALYZE (FINAL)
+// ANALYZE (FINAL FIX)
 // ======================
 app.post("/analyze", auth, upload.single("resume"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: "Resume required" });
-    if (!req.body.jobDescription)
-      return res.status(400).json({ error: "JD required" });
+
+    const jobDescription = req.body.jobDescription;
+    if (!jobDescription) return res.status(400).json({ error: "JD required" });
 
     const pdfData = await pdfParse(req.file.buffer);
-    const resumeText = pdfData.text.slice(0, 4000);
-    const jobDescription = req.body.jobDescription;
+    const resumeText = pdfData.text.slice(0, 5000);
 
-    // ======================
-    // CLEAN TEXT
-    // ======================
-    const clean = (txt) =>
-      txt.toLowerCase().replace(/[^a-z0-9+#.\s]/g, " ");
-
-    const resume = clean(resumeText);
-    const jd = clean(jobDescription);
-
-    // ======================
-    // SKILLS
-    // ======================
-    const SKILLS = [
-      "javascript","typescript","node","express","react","next","redux",
-      "mongodb","mysql","postgres","sql","nosql",
-      "html","css","tailwind","bootstrap",
-      "api","rest","graphql","jwt","authentication",
-      "aws","docker","kubernetes","ci","cd",
-      "python","java","c++","golang","rust",
-      "machine","learning","ai","nlp","data","analysis",
-      "git","github","oop","dsa","algorithms"
-    ];
-
-    const extract = (text) =>
-      SKILLS.filter(skill => text.includes(skill));
-
-    const resumeSkills = extract(resume);
-    const jdSkills = extract(jd);
-
-    const matched = jdSkills.filter(s => resumeSkills.includes(s));
-    const missing = jdSkills.filter(s => !resumeSkills.includes(s));
-
-    // ======================
-    // ATS SCORE (DETERMINISTIC)
-    // ======================
-    let score = 0;
-    if (jdSkills.length > 0) {
-      score = Math.round((matched.length / jdSkills.length) * 100);
-    }
-
-    if (score < 15) score = 15;
-    if (score > 92) score = 92;
-
-    // ======================
-    // AI ANALYSIS
-    // ======================
-    let ai = null;
+    let aiResult = null;
 
     try {
       const completion = await groq.chat.completions.create({
         model: "llama-3.1-8b-instant",
         temperature: 0.2,
-        max_tokens: 800,
+        max_tokens: 1200,
         messages: [
           {
             role: "system",
             content: `
-You are a professional ATS analyzer.
+You are a strict ATS system used by recruiters.
 
-DO NOT change score.
+Rules:
+- Do NOT inflate scores
+- Penalize missing key skills heavily
+- Evaluate relevance of experience, not just keywords
+- Compare resume vs job description deeply
 
-Return ONLY JSON.
+Return ONLY JSON:
+{
+ "matchScore": number,
+ "analysis": "detailed comparison",
+ "strengths": ["points"],
+ "missingSkills": ["points"],
+ "improvementSuggestions": ["points"],
+ "finalSummary": "summary"
+}
 `
           },
           {
             role: "user",
             content: `
-Score: ${score}
-
-Matched Skills:
-${matched.join(", ")}
-
-Missing Skills:
-${missing.join(", ")}
-
 Resume:
 ${resumeText}
 
-Job:
+Job Description:
 ${jobDescription}
-
-FORMAT:
-{
-  "reasoning": "",
-  "strengths": [],
-  "missingSkills": [],
-  "improvementSuggestions": [],
-  "finalSummary": ""
-}
 `
           }
-        ]
+        ],
       });
 
       let raw = completion.choices[0].message.content;
+
       raw = raw.replace(/```json|```/g, "").trim();
 
-      const start = raw.indexOf("{");
-      const end = raw.lastIndexOf("}");
-
-      if (start !== -1 && end !== -1) {
-        ai = JSON.parse(raw.substring(start, end + 1));
+      const match = raw.match(/\{[\s\S]*\}/);
+      if (match) {
+        aiResult = JSON.parse(match[0]);
       }
 
     } catch (err) {
@@ -257,16 +200,12 @@ FORMAT:
     }
 
     const result = {
-      matchScore: score,
-      reasoning:
-        ai?.reasoning ||
-        "Score based on skill alignment between resume and job description.",
-      strengths: ai?.strengths || matched,
-      missingSkills: ai?.missingSkills || missing,
-      improvementSuggestions:
-        ai?.improvementSuggestions || ["Improve skill alignment"],
-      finalSummary:
-        ai?.finalSummary || "Enhance resume based on job description."
+      matchScore: aiResult?.matchScore || 40,
+      reasoning: aiResult?.analysis || "Analysis not available",
+      strengths: aiResult?.strengths || [],
+      missingSkills: aiResult?.missingSkills || [],
+      improvementSuggestions: aiResult?.improvementSuggestions || [],
+      finalSummary: aiResult?.finalSummary || "",
     };
 
     await Analysis.create({
