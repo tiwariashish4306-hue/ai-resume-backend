@@ -16,21 +16,18 @@ function App() {
   const [loading, setLoading] = useState(false);
 
   // ======================
-  // VERIFY TOKEN (FIXED 🔥)
+  // VERIFY TOKEN (SAFE)
   // ======================
   useEffect(() => {
     const storedToken = localStorage.getItem("token");
 
-    if (!storedToken) {
+    if (!storedToken || storedToken === "undefined") {
       setAuthLoading(false);
       return;
     }
 
-    fetch(`${API_URL}/ping`, {
-      headers: {
-        Authorization: `Bearer ${storedToken}`,
-      },
-    })
+    // simple check (no auth needed on ping)
+    fetch(`${API_URL}/ping`)
       .then((res) => {
         if (res.ok) {
           setToken(storedToken);
@@ -54,19 +51,21 @@ function App() {
       return alert("Enter email & password");
     }
 
-    const res = await fetch(`${API_URL}/signup`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ email, password }),
-    });
+    try {
+      const res = await fetch(`${API_URL}/signup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
 
-    const data = await res.json();
+      const data = await res.json();
 
-    if (!res.ok) return alert(data.error);
+      if (!res.ok) return alert(data.error);
 
-    alert("Signup successful ✅");
+      alert("Signup successful ✅");
+    } catch {
+      alert("Server error");
+    }
   };
 
   // ======================
@@ -80,21 +79,21 @@ function App() {
     try {
       const res = await fetch(`${API_URL}/login`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
       });
 
-      const data = await res.json();
+      const text = await res.text();
 
-      if (!res.ok) {
-        return alert(data.error || "Login failed");
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        alert("Server error");
+        return;
       }
 
-      if (!data.token) {
-        return alert("Invalid server response");
-      }
+      if (!res.ok) return alert(data.error);
 
       localStorage.setItem("token", data.token);
       setToken(data.token);
@@ -136,10 +135,21 @@ function App() {
         body: formData,
       });
 
-      const data = await res.json();
+      const text = await res.text();
+
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        alert("Server unstable, try again");
+        setLoading(false);
+        return;
+      }
 
       if (!res.ok) {
-        return alert(data.error || "Analyze failed");
+        alert(data.error || "Analyze failed");
+        setLoading(false);
+        return;
       }
 
       setResult(data);
@@ -152,7 +162,7 @@ function App() {
   };
 
   // ======================
-  // LOADING SCREEN
+  // LOADING
   // ======================
   if (authLoading) {
     return <h2 style={{ textAlign: "center" }}>Checking session...</h2>;

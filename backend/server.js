@@ -39,7 +39,7 @@ const Analysis = mongoose.model("Analysis", new mongoose.Schema({
 }));
 
 // ======================
-// AUTH (STRICT)
+// AUTH
 // ======================
 function auth(req, res, next) {
   const header = req.headers.authorization;
@@ -51,15 +51,7 @@ function auth(req, res, next) {
   try {
     const token = header.split(" ")[1];
 
-    if (!token || token === "undefined" || token === "null") {
-      return res.status(401).json({ error: "Invalid token" });
-    }
-
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-    if (!decoded?.id) {
-      return res.status(401).json({ error: "Invalid token" });
-    }
 
     req.user = decoded;
     next();
@@ -78,7 +70,7 @@ const groq = new Groq({
 // ======================
 app.get("/", (req, res) => res.send("Server running"));
 
-// 🔐 TOKEN VERIFY
+// PUBLIC PING
 app.get("/ping", (req, res) => {
   res.json({ status: "alive" });
 });
@@ -108,7 +100,7 @@ app.post("/signup", async (req, res) => {
 });
 
 // ======================
-// LOGIN (NO BYPASS)
+// LOGIN
 // ======================
 app.post("/login", async (req, res) => {
   try {
@@ -144,102 +136,78 @@ app.post("/login", async (req, res) => {
 });
 
 // ======================
-// ANALYZE (PROTECTED)
+// ANALYZE (FINAL)
 // ======================
 app.post("/analyze", auth, upload.single("resume"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: "Resume required" });
-
-    const jobDescription = req.body.jobDescription;
-    if (!jobDescription) return res.status(400).json({ error: "JD required" });
+    if (!req.body.jobDescription)
+      return res.status(400).json({ error: "JD required" });
 
     const pdfData = await pdfParse(req.file.buffer);
     const resumeText = pdfData.text.slice(0, 4000);
+    const jobDescription = req.body.jobDescription;
 
     // ======================
-    // 1. BASIC NLP HELPERS
+    // CLEAN TEXT
     // ======================
-    const STOPWORDS = new Set([
-      "the","and","for","with","that","this","have","has","you","your","from","are","was","were","will","can","all","any","our","their","they","them","use","using","used","into","over","more","than","such","etc","via","per","based"
-    ]);
+    const clean = (txt) =>
+      txt.toLowerCase().replace(/[^a-z0-9+#.\s]/g, " ");
 
-    const normalize = (txt) =>
-      txt
-        .toLowerCase()
-        .replace(/[^a-z0-9+.#\s]/g, " ")
-        .split(/\s+/)
-        .filter(w => w && w.length > 2 && !STOPWORDS.has(w));
+    const resume = clean(resumeText);
+    const jd = clean(jobDescription);
 
-    // Common tech keywords (extend anytime)
-    const TECH = [
+    // ======================
+    // SKILLS
+    // ======================
+    const SKILLS = [
       "javascript","typescript","node","express","react","next","redux",
       "mongodb","mysql","postgres","sql","nosql",
       "html","css","tailwind","bootstrap",
-      "api","rest","graphql","jwt","auth","authentication",
+      "api","rest","graphql","jwt","authentication",
       "aws","docker","kubernetes","ci","cd",
       "python","java","c++","golang","rust",
       "machine","learning","ai","nlp","data","analysis",
       "git","github","oop","dsa","algorithms"
     ];
 
-    const extractSkills = (words) => {
-      const set = new Set();
-      words.forEach(w => {
-        if (TECH.includes(w)) set.add(w);
-      });
-      return Array.from(set);
-    };
+    const extract = (text) =>
+      SKILLS.filter(skill => text.includes(skill));
 
-    const resumeWords = normalize(resumeText);
-    const jdWords = normalize(jobDescription);
+    const resumeSkills = extract(resume);
+    const jdSkills = extract(jd);
 
-    const resumeSkills = extractSkills(resumeWords);
-    const jdSkills = extractSkills(jdWords);
-
-    // ======================
-    // 2. DETERMINISTIC SCORING
-    // ======================
-    const intersection = jdSkills.filter(s => resumeSkills.includes(s));
+    const matched = jdSkills.filter(s => resumeSkills.includes(s));
     const missing = jdSkills.filter(s => !resumeSkills.includes(s));
 
-    // Coverage score
-    const coverage = jdSkills.length
-      ? intersection.length / jdSkills.length
-      : 0.3;
+    // ======================
+    // ATS SCORE (DETERMINISTIC)
+    // ======================
+    let score = 0;
+    if (jdSkills.length > 0) {
+      score = Math.round((matched.length / jdSkills.length) * 100);
+    }
 
-    // Keyword density (rough signal)
-    const keywordHits = resumeWords.filter(w => jdWords.includes(w)).length;
-    const density = Math.min(1, keywordHits / (jdWords.length || 50));
-
-    // Final score (weighted)
-    let score =
-      Math.round((coverage * 0.7 + density * 0.3) * 100);
-
-    // Clamp realistic band
-    if (score < 20) score = 20;
-    if (score > 95) score = 95;
+    if (score < 15) score = 15;
+    if (score > 92) score = 92;
 
     // ======================
-    // 3. LLM FOR EXPLANATION ONLY
+    // AI ANALYSIS
     // ======================
-    let aiText = null;
+    let ai = null;
 
     try {
       const completion = await groq.chat.completions.create({
         model: "llama-3.1-8b-instant",
         temperature: 0.2,
-        max_tokens: 700,
+        max_tokens: 800,
         messages: [
           {
             role: "system",
             content: `
-You are an ATS expert.
+You are a professional ATS analyzer.
 
-Do NOT change the score.
-Write clear analysis based on:
-- matched skills
-- missing skills
-- resume vs JD alignment
+DO NOT change score.
 
 Return ONLY JSON.
 `
@@ -250,7 +218,7 @@ Return ONLY JSON.
 Score: ${score}
 
 Matched Skills:
-${intersection.join(", ")}
+${matched.join(", ")}
 
 Missing Skills:
 ${missing.join(", ")}
@@ -258,16 +226,16 @@ ${missing.join(", ")}
 Resume:
 ${resumeText}
 
-Job Description:
+Job:
 ${jobDescription}
 
 FORMAT:
 {
- "reasoning": "4-5 lines",
- "strengths": ["3-5 points"],
- "missingSkills": ["3-5 points"],
- "improvementSuggestions": ["3-5 points"],
- "finalSummary": "improved summary"
+  "reasoning": "",
+  "strengths": [],
+  "missingSkills": [],
+  "improvementSuggestions": [],
+  "finalSummary": ""
 }
 `
           }
@@ -277,38 +245,38 @@ FORMAT:
       let raw = completion.choices[0].message.content;
       raw = raw.replace(/```json|```/g, "").trim();
 
-      aiText = JSON.parse(raw);
+      const start = raw.indexOf("{");
+      const end = raw.lastIndexOf("}");
+
+      if (start !== -1 && end !== -1) {
+        ai = JSON.parse(raw.substring(start, end + 1));
+      }
 
     } catch (err) {
       console.log("AI ERROR:", err.message);
     }
 
-    // ======================
-    // 4. FINAL RESPONSE
-    // ======================
-    const finalResult = {
+    const result = {
       matchScore: score,
-      reasoning: aiText?.reasoning || "Based on skill overlap and keyword matching.",
-      strengths: aiText?.strengths || intersection.slice(0, 5),
-      missingSkills: aiText?.missingSkills || missing.slice(0, 5),
+      reasoning:
+        ai?.reasoning ||
+        "Score based on skill alignment between resume and job description.",
+      strengths: ai?.strengths || matched,
+      missingSkills: ai?.missingSkills || missing,
       improvementSuggestions:
-        aiText?.improvementSuggestions || [
-          "Add missing skills from job description",
-          "Improve project descriptions",
-          "Use ATS-friendly keywords"
-        ],
+        ai?.improvementSuggestions || ["Improve skill alignment"],
       finalSummary:
-        aiText?.finalSummary || "Resume can be improved by aligning with JD."
+        ai?.finalSummary || "Enhance resume based on job description."
     };
 
     await Analysis.create({
       userId: req.user.id,
       resumeText,
       jobDescription,
-      ...finalResult,
+      ...result,
     });
 
-    res.json(finalResult);
+    res.json(result);
 
   } catch (err) {
     console.log("SERVER ERROR:", err);
@@ -316,8 +284,13 @@ FORMAT:
   }
 });
 
+// ======================
+// START
+// ======================
 mongoose.connect(process.env.MONGO_URI)
   .then(() => {
-    app.listen(PORT, () => console.log("Server running"));
+    app.listen(PORT, () =>
+      console.log("Server running on", PORT)
+    );
   })
   .catch(console.log);
