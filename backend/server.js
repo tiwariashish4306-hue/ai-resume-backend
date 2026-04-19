@@ -79,8 +79,8 @@ const groq = new Groq({
 app.get("/", (req, res) => res.send("Server running"));
 
 // 🔐 TOKEN VERIFY
-app.get("/ping", auth, (req, res) => {
-  res.json({ status: "valid" });
+app.get("/ping", (req, res) => {
+  res.json({ status: "alive" });
 });
 
 // ======================
