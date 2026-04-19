@@ -16,19 +16,22 @@ function App() {
   const [loading, setLoading] = useState(false);
 
   // ======================
-  // CHECK SESSION
+  // VERIFY TOKEN
   // ======================
   useEffect(() => {
     const storedToken = localStorage.getItem("token");
 
-    if (!storedToken || storedToken === "undefined") {
+    if (!storedToken) {
       setAuthLoading(false);
       return;
     }
 
-    // just check backend alive
-    fetch(`${API_URL}/ping`)
-      .then((res) => {
+    fetch(`${API_URL}/ping`, {
+      headers: {
+        Authorization: `Bearer ${storedToken}`,
+      },
+    })
+      .then(async (res) => {
         if (res.ok) {
           setToken(storedToken);
         } else {
@@ -38,9 +41,7 @@ function App() {
       .catch(() => {
         localStorage.removeItem("token");
       })
-      .finally(() => {
-        setAuthLoading(false);
-      });
+      .finally(() => setAuthLoading(false));
   }, []);
 
   // ======================
@@ -74,7 +75,7 @@ function App() {
   // LOGIN
   // ======================
   const handleLogin = async () => {
-    if (!email.trim() || !password.trim()) {
+    if (!email || !password) {
       return alert("Enter email & password");
     }
 
@@ -93,11 +94,11 @@ function App() {
       try {
         data = JSON.parse(text);
       } catch {
-        alert("Server error");
-        return;
+        console.error("NON JSON RESPONSE:", text);
+        return alert("Server returned invalid response");
       }
 
-      if (!res.ok) return alert(data.error);
+      if (!res.ok) return alert(data.error || "Login failed");
 
       localStorage.setItem("token", data.token);
       setToken(data.token);
@@ -145,21 +146,18 @@ function App() {
       try {
         data = JSON.parse(text);
       } catch {
-        console.error("Invalid JSON:", text);
-        alert("Server error (invalid response)");
-        setLoading(false);
-        return;
+        console.error("NOT JSON:", text);
+        return alert("Backend returned HTML instead of JSON ❌");
       }
 
       if (!res.ok) {
-        alert(data.error || "Analyze failed");
-        setLoading(false);
-        return;
+        return alert(data.error || "Analyze failed");
       }
 
       setResult(data);
 
-    } catch {
+    } catch (err) {
+      console.error(err);
       alert("Server error");
     }
 
@@ -167,7 +165,7 @@ function App() {
   };
 
   // ======================
-  // LOADING SCREEN
+  // LOADING
   // ======================
   if (authLoading) {
     return <h2 style={{ textAlign: "center" }}>Checking session...</h2>;
@@ -240,8 +238,7 @@ function App() {
 
             <h2>{result.matchScore}% Match</h2>
 
-            <h3>🧠 Detailed Analysis</h3>
-            <p>{result.reasoning}</p>
+            <p><b>Analysis:</b> {result.reasoning}</p>
 
             <h3>💪 Strengths</h3>
             <ul>
@@ -257,14 +254,14 @@ function App() {
               ))}
             </ul>
 
-            <h3>🚀 Improvements</h3>
+            <h3>🚀 Suggestions</h3>
             <ul>
               {result.improvementSuggestions?.map((s, i) => (
                 <li key={i}>{s}</li>
               ))}
             </ul>
 
-            <h3>📄 Final Summary</h3>
+            <h3>📄 Improved Summary</h3>
             <p>{result.finalSummary}</p>
 
           </div>
