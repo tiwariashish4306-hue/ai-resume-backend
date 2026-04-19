@@ -154,55 +154,164 @@ app.post("/analyze", auth, upload.single("resume"), async (req, res) => {
     if (!jobDescription) return res.status(400).json({ error: "JD required" });
 
     const pdfData = await pdfParse(req.file.buffer);
-    const resumeText = pdfData.text.slice(0, 3000);
+    const resumeText = pdfData.text.slice(0, 4000);
 
-    let aiResult = {
-      matchScore: 60,
-      reasoning: "",
-      strengths: [],
-      missingSkills: [],
-      improvementSuggestions: [],
-      finalSummary: "",
+    // ======================
+    // 1. BASIC NLP HELPERS
+    // ======================
+    const STOPWORDS = new Set([
+      "the","and","for","with","that","this","have","has","you","your","from","are","was","were","will","can","all","any","our","their","they","them","use","using","used","into","over","more","than","such","etc","via","per","based"
+    ]);
+
+    const normalize = (txt) =>
+      txt
+        .toLowerCase()
+        .replace(/[^a-z0-9+.#\s]/g, " ")
+        .split(/\s+/)
+        .filter(w => w && w.length > 2 && !STOPWORDS.has(w));
+
+    // Common tech keywords (extend anytime)
+    const TECH = [
+      "javascript","typescript","node","express","react","next","redux",
+      "mongodb","mysql","postgres","sql","nosql",
+      "html","css","tailwind","bootstrap",
+      "api","rest","graphql","jwt","auth","authentication",
+      "aws","docker","kubernetes","ci","cd",
+      "python","java","c++","golang","rust",
+      "machine","learning","ai","nlp","data","analysis",
+      "git","github","oop","dsa","algorithms"
+    ];
+
+    const extractSkills = (words) => {
+      const set = new Set();
+      words.forEach(w => {
+        if (TECH.includes(w)) set.add(w);
+      });
+      return Array.from(set);
     };
+
+    const resumeWords = normalize(resumeText);
+    const jdWords = normalize(jobDescription);
+
+    const resumeSkills = extractSkills(resumeWords);
+    const jdSkills = extractSkills(jdWords);
+
+    // ======================
+    // 2. DETERMINISTIC SCORING
+    // ======================
+    const intersection = jdSkills.filter(s => resumeSkills.includes(s));
+    const missing = jdSkills.filter(s => !resumeSkills.includes(s));
+
+    // Coverage score
+    const coverage = jdSkills.length
+      ? intersection.length / jdSkills.length
+      : 0.3;
+
+    // Keyword density (rough signal)
+    const keywordHits = resumeWords.filter(w => jdWords.includes(w)).length;
+    const density = Math.min(1, keywordHits / (jdWords.length || 50));
+
+    // Final score (weighted)
+    let score =
+      Math.round((coverage * 0.7 + density * 0.3) * 100);
+
+    // Clamp realistic band
+    if (score < 20) score = 20;
+    if (score > 95) score = 95;
+
+    // ======================
+    // 3. LLM FOR EXPLANATION ONLY
+    // ======================
+    let aiText = null;
 
     try {
       const completion = await groq.chat.completions.create({
         model: "llama-3.1-8b-instant",
-        temperature: 0.3,
-        max_tokens: 1000,
+        temperature: 0.2,
+        max_tokens: 700,
         messages: [
           {
             role: "system",
-            content: `Return ONLY JSON:
-{
-  "matchScore": number,
-  "reasoning": "",
-  "strengths": [],
-  "missingSkills": [],
-  "improvementSuggestions": [],
-  "finalSummary": ""
-}`
+            content: `
+You are an ATS expert.
+
+Do NOT change the score.
+Write clear analysis based on:
+- matched skills
+- missing skills
+- resume vs JD alignment
+
+Return ONLY JSON.
+`
           },
           {
             role: "user",
-            content: `Resume:\n${resumeText}\n\nJob:\n${jobDescription}`
+            content: `
+Score: ${score}
+
+Matched Skills:
+${intersection.join(", ")}
+
+Missing Skills:
+${missing.join(", ")}
+
+Resume:
+${resumeText}
+
+Job Description:
+${jobDescription}
+
+FORMAT:
+{
+ "reasoning": "4-5 lines",
+ "strengths": ["3-5 points"],
+ "missingSkills": ["3-5 points"],
+ "improvementSuggestions": ["3-5 points"],
+ "finalSummary": "improved summary"
+}
+`
           }
-        ],
+        ]
       });
 
-      const raw = completion.choices[0].message.content;
-      const match = raw.match(/\{[\s\S]*\}/);
+      let raw = completion.choices[0].message.content;
+      raw = raw.replace(/```json|```/g, "").trim();
 
-      if (match) {
-        const parsed = JSON.parse(match[0]);
-        aiResult = parsed;
-      }
+      aiText = JSON.parse(raw);
 
-    } catch {}
+    } catch (err) {
+      console.log("AI ERROR:", err.message);
+    }
 
-    res.json(aiResult);
+    // ======================
+    // 4. FINAL RESPONSE
+    // ======================
+    const finalResult = {
+      matchScore: score,
+      reasoning: aiText?.reasoning || "Based on skill overlap and keyword matching.",
+      strengths: aiText?.strengths || intersection.slice(0, 5),
+      missingSkills: aiText?.missingSkills || missing.slice(0, 5),
+      improvementSuggestions:
+        aiText?.improvementSuggestions || [
+          "Add missing skills from job description",
+          "Improve project descriptions",
+          "Use ATS-friendly keywords"
+        ],
+      finalSummary:
+        aiText?.finalSummary || "Resume can be improved by aligning with JD."
+    };
 
-  } catch {
+    await Analysis.create({
+      userId: req.user.id,
+      resumeText,
+      jobDescription,
+      ...finalResult,
+    });
+
+    res.json(finalResult);
+
+  } catch (err) {
+    console.log("SERVER ERROR:", err);
     res.status(500).json({ error: "Server error" });
   }
 });

@@ -9,6 +9,7 @@ const analysisSchema = new mongoose.Schema(
     strengths: [String],
     missingSkills: [String],
     improvementSuggestions: [String],
+    finalSummary: String,
   },
   { timestamps: true }
 );
