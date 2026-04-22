@@ -37,7 +37,8 @@ So I built this to simulate how recruiters evaluate resumes using AI.
 
 🎥 Demo
 
-👉 (Paste your video link here)
+https://drive.google.com/file/d/1nxf6Yw6uU3T6gy_RpTz2SRJSPJY2K6Mj/view?usp=drivesdk
+
 
 ---
 
